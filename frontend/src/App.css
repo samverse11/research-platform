@@ -1,0 +1,116 @@
+/* frontend/src/App.css */
+:root {
+  --color-black: #0a0a0a;
+  --color-dark-gray: #1a1a1a;
+  --color-gold: #d4af37;
+  --color-electric-blue: #00d4ff;
+  --color-white: #ffffff;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--color-black);
+  color: var(--color-white);
+}
+
+.App {
+  min-height:  100vh;
+}
+
+/* Navbar */
+.navbar {
+  background: var(--color-dark-gray);
+  border-bottom: 1px solid #2a2a2a;
+  position: sticky;
+  top: 0;
+  z-index:  100;
+}
+
+.nav-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 30px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 70px;
+}
+
+.nav-logo {
+  font-size: 1.3em;
+  font-weight:  500;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, var(--color-white) 0%, var(--color-electric-blue) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-decoration: none;
+  transition: opacity 0.3s;
+}
+
+.nav-logo:hover {
+  opacity: 0.8;
+}
+
+.nav-menu {
+  display: flex;
+  list-style: none;
+  gap: 40px;
+  align-items: center;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: #e5e5e5;
+  font-weight: 500;
+  font-size: 0.95em;
+  transition: color 0.3s;
+  padding: 8px 0;
+  position: relative;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--color-electric-blue);
+  transition: width 0.3s;
+}
+
+.nav-link:hover {
+  color: var(--color-electric-blue);
+}
+
+.nav-link:hover::after {
+  width:  100%;
+}
+
+.content {
+  min-height: calc(100vh - 70px);
+}
+
+@media (max-width: 768px) {
+  .nav-container {
+    flex-direction: column;
+    height: auto;
+    padding: 20px;
+    gap: 15px;
+  }
+
+  .nav-menu {
+    gap: 20px;
+  }
+}

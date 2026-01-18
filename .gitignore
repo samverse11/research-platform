@@ -1,0 +1,346 @@
+# =============================================================================
+# Python
+# =============================================================================
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+*.venv
+**/.venv/
+**/venv/
+**/.venv
+**/venv
+**/.env
+.env
+
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / Packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*. manifest
+*.spec
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage. xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# =============================================================================
+# Environment Variables & Secrets
+# =============================================================================
+
+# Environment files (NEVER commit these!)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.env
+
+# API Keys & Secrets
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.crt
+*.der
+*.pub
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+
+# =============================================================================
+# Frontend (React/Node.js)
+# =============================================================================
+
+# Dependencies
+node_modules/
+**/node_modules/
+jspm_packages/
+package-lock.json
+yarn.lock
+
+# Production build
+/build
+/dist
+
+# Testing
+/coverage
+
+# Misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test. local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# =============================================================================
+# IDEs & Editors
+# =============================================================================
+
+# VSCode
+.vscode/
+*. code-workspace
+.history/
+
+# PyCharm
+.idea/
+*. iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.tmlanguage.cache
+*.tmPreferences.cache
+*.stTheme.cache
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# =============================================================================
+# Data & Models
+# =============================================================================
+
+# Machine Learning Models
+*.bin
+*.pt
+*.pth
+*.h5
+*.pb
+*.onnx
+*.tflite
+models/
+checkpoints/
+
+# Data files
+data/
+*.csv
+*.tsv
+*.json. gz
+*.parquet
+*.feather
+*.pkl
+*.pickle
+
+# Vector databases
+*.faiss
+*.index
+chroma/
+chromadb/
+
+# Datasets
+datasets/
+raw_data/
+processed_data/
+
+# =============================================================================
+# Logs & Databases
+# =============================================================================
+
+# Logs
+logs/
+*.log
+log/
+
+# Databases
+*.db
+*. sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Redis
+dump.rdb
+
+# =============================================================================
+# Operating System
+# =============================================================================
+
+# macOS
+.DS_Store
+. AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+. Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*. stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*. cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+. directory
+.Trash-*
+. nfs*
+
+# =============================================================================
+# Project Specific
+# =============================================================================
+
+# Backup files
+*.bak
+*.backup
+*.old
+*-backup/
+backup/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Archives
+*.zip
+*.tar
+*. tar.gz
+*.rar
+*. 7z
+
+# Large files (use Git LFS if needed)
+*.pdf
+*.pptx
+*.docx
+
+# Personal notes
+notes. txt
+TODO.txt
+NOTES.md
+
+# Cache directories
+. cache/
+cache/
+
+# =============================================================================
+# Docker (if you add it later)
+# =============================================================================
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+. docker/
+
+# =============================================================================
+# Miscellaneous
+# =============================================================================
+
+# Certificates
+*.cert
+*.certificate
+
+# Configuration overrides
+config.local.*
+*. local. json
+
+# Debug files
+debug/
+*.debug
+
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# production
+/build
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+frontend/. git/
