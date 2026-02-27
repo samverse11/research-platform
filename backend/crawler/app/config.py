@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     USE_VECTOR_DB: bool = False
     VECTOR_DB_TYPE: str = "faiss"
     VECTOR_DB_PATH: str = "./data/vector_store"
+    # Paper cache (SQLite) + refresh policy
+    PAPER_DB_PATH: str = "./data/papers.sqlite"
+    CACHE_STALE_HOURS: int = 6
+    FETCH_SOURCE_TIMEOUT_S: float = 12.0
     
     # Cache Settings
     ENABLE_CACHE: bool = True

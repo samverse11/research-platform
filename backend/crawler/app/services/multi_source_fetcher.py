@@ -8,6 +8,8 @@ from datetime import datetime
 from crawler.app.models import Paper
 from crawler.app.config import get_settings
 import xml.etree.ElementTree as ET
+import asyncio
+from typing import Tuple
 
 settings = get_settings()
 
@@ -55,6 +57,45 @@ class MultiSourceFetcher:
         print(f"\n📊 Total unique papers: {len(unique_papers)}")
         
         return unique_papers
+    
+    async def fetch_papers_async(
+        self,
+        query: str,
+        sources: List[str],
+        max_results: int = 50,
+        min_year: int = 2015,
+        max_year: int = 2024,
+        per_source_timeout_s: float = 12.0
+    ) -> List[Paper]:
+        """
+        Fetch papers from multiple sources in parallel.
+
+        Uses threads for the existing blocking fetchers (requests/urllib).
+        Keeps the same dedup behavior as fetch_papers().
+        """
+
+        async def fetch_one(source: str) -> Tuple[str, List[Paper]]:
+            try:
+                papers = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._fetch_from_source,
+                        source, query, max_results, min_year, max_year
+                    ),
+                    timeout=per_source_timeout_s
+                )
+                return source, papers or []
+            except Exception:
+                return source, []
+
+        results = await asyncio.gather(*(fetch_one(s) for s in sources))
+
+        all_papers: List[Paper] = []
+        for source, papers in results:
+            if papers:
+                all_papers.extend(papers)
+
+        unique = self._deduplicate_papers(all_papers)
+        return unique
     
     def _fetch_from_source(
         self,
