@@ -10,14 +10,14 @@ function HomePage() {
       <section className="hero-section">
         <div className="hero-content">
           <h1 className="hero-title">
-            Research Paper
-            <span className="hero-title-highlight"> Discovery</span>
+            AI-Powered Cross-Lingual
+            <span className="hero-title-highlight"> Research Discovery System</span>
           </h1>
           <p className="hero-subtitle">
-            AI-powered semantic search engine for academic literature
+            Discover and analyze research papers across languages using AI-powered semantic search and summarization.
           </p>
           <p className="hero-description">
-            Search across 600M+ papers from multiple sources with intelligent ranking powered by transformer embeddings
+            Retrieve relevant research papers using semantic search, summarize both English and German research papers, and generate grouped summaries to compare key insights across selected documents.
           </p>
           <Link to="/search" className="hero-cta">
             Start Searching →

@@ -5,7 +5,7 @@ function SummarizePage() {
   return (
     <div style={{padding: '40px', textAlign: 'center'}}>
       <h1>📝 Paper Summarization</h1>
-      <p>Coming soon - teammate will implement this module</p>
+      <p>Generate comprehensive summaries across multiple papers.</p>
     </div>
   );
 }

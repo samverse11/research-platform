@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     SERPAPI_KEY: str = ""  # For Google Scholar (100 free/month)
     IEEE_API_KEY: str = ""  # Free from https://developer.ieee.org/
     SPRINGER_API_KEY:  str = ""  # Free from https://dev.springernature.com/
+    GROQ_API_KEY: str = ""
     
     # OpenAlex (no key needed, just email for polite pool)
     OPENALEX_EMAIL: str = ""  # Your email for rate limit boost
@@ -38,6 +39,7 @@ class Settings(BaseSettings):
     USE_VECTOR_DB: bool = False
     VECTOR_DB_TYPE: str = "faiss"
     VECTOR_DB_PATH: str = "./data/vector_store"
+    FAISS_INDEX_PATH: str = "data/faiss_index"
     # Paper cache (SQLite) + refresh policy
     PAPER_DB_PATH: str = "./data/papers.sqlite"
     CACHE_STALE_HOURS: int = 6
@@ -51,6 +53,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
