@@ -1,5 +1,5 @@
 # backend/analyzer/app/main.py  —  v3.0  pymupdf + LazyGraphRAG + Vision
-#
+# main.py
 # v3.0 changes:
 #   - PyMuPDF (fitz) as primary PDF parser — milliseconds vs 2+ min docling
 #   - pypdf as fallback only
