@@ -24,8 +24,9 @@ def save_signature(sig: Dict[str, Any]) -> None:
 def _normalize_query(q: str) -> str:
     return " ".join(q.lower().strip().split())
 
-def signature_for_request(sources: List[str], min_year: int, max_year: int) -> Dict[str, Any]:
+def signature_for_request(query: str, sources: List[str], min_year: int, max_year: int) -> Dict[str, Any]:
     return {
+        "query": _normalize_query(query),
         "sources": sorted(list(sources)),
         "min_year": int(min_year),
         "max_year": int(max_year),

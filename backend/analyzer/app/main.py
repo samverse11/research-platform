@@ -26,6 +26,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import groq as groq_sdk
+import numpy as np
+import faiss
+try:
+    from crawler.app.services.embeddings import get_embedding_service
+except ImportError:
+    get_embedding_service = None
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -37,6 +43,15 @@ except ImportError:
     pass
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+USE_NOUGAT = os.getenv("USE_NOUGAT", "False").lower() in ("true", "1", "yes")
+
+try:
+    from analyzer.app.nougat_extractor import extract_with_nougat
+except ImportError:
+    try:
+        from .nougat_extractor import extract_with_nougat  # for relative import resolution
+    except ImportError:
+        extract_with_nougat = None
 
 app = FastAPI(title="Analyzer Module", version="3.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -83,18 +98,29 @@ class FormulaEntry(BaseModel):
     page: Optional[int] = None
     section: Optional[str] = ""
     source: Optional[str] = "text"   # "text" or "image"
+    provenance: Optional[str] = "directly_stated"
+    image_base64: Optional[str] = None
 
 class MetricEntry(BaseModel):
     name: str
     value: str
     context: str
     page: Optional[int] = None
+    provenance: Optional[str] = "directly_stated"
 
 class MethodologyStep(BaseModel):
     step_number: int
     title: str
     description: str
     key_detail: Optional[str] = ""
+    provenance: Optional[str] = "procedural"
+
+class ImplementationDetail(BaseModel):
+    tool_technique: str
+    input: str
+    output: str
+    quote: str
+    provenance: Optional[str] = "procedural"
 
 class PotentialIssue(BaseModel):
     severity: str
@@ -111,6 +137,7 @@ class ClaimEntry(BaseModel):
     citations_found: List[str] = []
     status: str  # "supported" | "unsupported" | "original_contribution"
     risk_note: Optional[str] = ""
+    provenance: Optional[str] = "directly_stated"
 
 class ResearchGap(BaseModel):
     gap_type: str
@@ -129,6 +156,7 @@ class PaperResult(BaseModel):
     formulas: List[FormulaEntry]
     metrics: List[MetricEntry]
     methodology_steps: List[MethodologyStep]
+    implementation_details: List[ImplementationDetail] = []
     potential_issues: List[PotentialIssue]
     comparison: ComparisonData
     # New v3.0 fields
@@ -331,14 +359,31 @@ def _build_graph_summary(graph: list) -> str:
     Compact text representation of citation graph for Groq.
     Hard capped at 3000 chars to stay within token limits.
     """
-    lines = []
+    priority_keywords = ["abstract", "introduction", "conclusion", "contribution", "summary", "related work"]
+    priority_nodes = []
+    other_nodes = []
+    
     for node in graph:
+        h = node["heading"].lower()
+        if any(k in h for k in priority_keywords):
+            priority_nodes.append(node)
+        else:
+            other_nodes.append(node)
+            
+    # Put priority nodes first to ensure claim verification tests right context
+    ordered_nodes = priority_nodes + other_nodes
+    
+    lines = []
+    for node in ordered_nodes:
         cites = ", ".join(node["citations"][:5]) if node["citations"] else "none"
         lines.append(
             f'[{node["id"]}] Section: "{node["heading"]}" | Page: {node["page_num"]} | '
             f'Citations: {cites} | '
-            f'Text: {node["text"][:200].strip()}...'
+            f'Text: {node["text"][:250].strip()}...'
         )
+        if len("\n".join(lines)) > 3000:
+            break
+            
     return "\n".join(lines)[:3000]
 
 
@@ -392,7 +437,8 @@ def _extract_formula_from_image(img_bytes: bytes, page_num: int, section: str) -
                 "results_obtained": "N/A",
                 "page": page_num,
                 "section": section,
-                "source": "image"
+                "source": "image",
+                "image_base64": f"data:image/png;base64,{b64}"
             }
     except Exception as e:
         print(f"  ⚠️ Vision extraction failed page {page_num}: {e}")
@@ -403,19 +449,73 @@ def _extract_formula_from_image(img_bytes: bytes, page_num: int, section: str) -
 def _sections(text: str):
     """
     front  = first 3000 chars  — title, abstract, intro
-    body   = 8000 chars from 12%-62% — problem formulation, methods, formulas, experiments
     tail   = last 2000 chars   — conclusion, references
-
-    12%-62% of a 60k paper = chars 7k-37k = covers pages 2-9 of a 15-page paper.
-    This captures early formulas (page 3-4) AND contrastive loss / experiments (page 5-7).
     """
     n = len(text)
     front      = text[:3000]
-    body_start = max(3000, int(n * 0.12))
-    body_end   = min(n,    int(n * 0.62))
-    body       = text[body_start:body_end][:8000]
     tail       = text[-2000:] if n > 5000 else ""
-    return front, body, tail
+    return front, "", tail
+
+def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> List[str]:
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += (chunk_size - overlap)
+    return chunks
+
+def _build_rag_chunks(text: str, chunk_size: int = 800, overlap: int = 150) -> List[str]:
+    """Returns overlapping chunks of the text."""
+    if not text:
+        return []
+    return chunk_text(text, chunk_size, overlap)
+
+def _semantic_retrieve_multi(
+    queries: List[str],
+    chunks: List[str],
+    emb_svc,
+    doc_embs: np.ndarray,
+    top_k: int = 5
+) -> List[str]:
+    """
+    Run multiple queries against chunk embeddings to build focused context.
+    """
+    if not chunks or len(chunks) == 0 or doc_embs.shape[0] == 0:
+        return []
+        
+    try:
+        # Build memory index
+        dim = doc_embs.shape[1]
+        index = faiss.IndexFlatIP(dim)
+        
+        # normalize document embeddings (copy to avoid side effects)
+        embs_copy = doc_embs.copy().astype(np.float32)
+        faiss.normalize_L2(embs_copy)
+        index.add(embs_copy)
+        
+        seen_idx = set()
+        ranked = []  # (score, idx)
+        
+        for q in queries:
+            q_emb = emb_svc.encode_query(q)
+            q_emb = q_emb.reshape(1, -1).astype(np.float32)
+            faiss.normalize_L2(q_emb)
+            
+            distances, indices = index.search(q_emb, min(top_k, len(chunks)))
+            
+            for dist, idx in zip(distances[0], indices[0]):
+                if idx not in seen_idx and idx >= 0:
+                    seen_idx.add(idx)
+                    ranked.append((float(dist), int(idx)))
+                    
+        # Sort merged results by score, return top_k originals
+        ranked.sort(key=lambda x: -x[0])
+        return [chunks[idx] for _, idx in ranked[:top_k]]
+        
+    except Exception as e:
+        print(f"  ⚠️ Multi-query RAG failed: {e}")
+        return chunks[:top_k]
 
 
 # ── Groq Prompts (call1, call2 unchanged; call3 new) ─────────────────────────
@@ -529,22 +629,18 @@ def _method_metrics_prompt(body: str) -> str:
     )
 
 def _prompt_formulas(body: str) -> str:
-    """Call A — formula extraction. Handles garbled PDF math text."""
+    """Call A — formula extraction. Handles garbled PDF math text & clean Nougat LaTeX."""
     return (
         'You are a mathematical formula extractor for academic papers.\n'
         'Return ONLY valid JSON. No markdown, no explanation.\n\n'
-        'IMPORTANT: PDF text extraction often garbles math. You will see things like:\n'
-        '  "H T (G) = P α∈T H T (G; α)" or "arg min T :height(T )≤L H T S2 (G)"\n'
-        'These ARE formulas — just rendered as broken text by the PDF parser.\n'
-        'Your job is to RECONSTRUCT them into clean LaTeX.\n\n'
-        'RULES:\n'
-        '- Extract ALL equations, whether cleanly typeset or garbled.\n'
-        '- Look for patterns: variable = expression, argmin/argmax, sum/product notation,\n'
-        '  Greek letters (α β γ λ τ θ), subscripts written as _v or as separate chars.\n'
-        '- Convert each to proper LaTeX (e.g. H_T(G;\\alpha) = -\\frac{g_\\alpha}{Vol(G)}...).\n'
-        '- Give each formula a clear name based on what it computes.\n'
-        '- For explanation: define EVERY symbol used.\n'
-        '- For purpose: explain specifically WHY this paper needs this formula.\n\n'
+        'IMPORTANT: The text contains mathematical formulas. They may be perfectly formatted LaTeX (e.g. from optical character recognition) or garbled text (like "H T (G) = P α∈T H T (G; α)"). '
+        'Your job is to pull EVERY mathematical concept out and format it into clean LaTeX.\n\n'
+        'CLASSIFICATION GATE:\n'
+        '- Look carefully for actual mathematical equations, loss functions, algorithms, constraints, and metrics.\n'
+        '- If you find them, YOU MUST CAPTURE THEM.\n'
+        '- EXPLICITLY FORBIDDEN: Do not invent formulas for standard prose.\n'
+        '- GREEDY EXTRACTION: You will extract absolutely ALL mathematical formulas found within the provided text block.\n'
+        'If NO valid formulas are found in the text, return {"formulas": []}.\n\n'
         '{\n'
         '  "formulas": [\n'
         '    {\n'
@@ -555,7 +651,8 @@ def _prompt_formulas(body: str) -> str:
         '      "purpose": "specifically why the authors introduce this formula in their system",\n'
         '      "results_obtained": "numerical value if reported, else N/A",\n'
         '      "page": 0,\n'
-        '      "section": "section name"\n'
+        '      "section": "section name",\n'
+        '      "provenance": "directly_stated or inferred"\n'
         '    }\n'
         '  ]\n'
         '}\n\n'
@@ -564,35 +661,43 @@ def _prompt_formulas(body: str) -> str:
 
 
 def _prompt_methods_issues(body: str) -> str:
-    """Call B — methodology + metrics + issues."""
+    """Call B — methodology + methodology + issues + implementation."""
     return (
         'You are a senior researcher analyzing a paper\'s methodology.\n'
         'Return ONLY valid JSON. No markdown, no explanation.\n\n'
         'RULES FOR methodology_steps:\n'
-        '- Extract 5-8 steps. Use research language, not casual language.\n'
-        '- Each description MUST answer three questions:\n'
-        '  WHAT: what technical component or process is described\n'
-        '  HOW: the specific technique, model, or algorithm used\n'
-        '  WHY: the motivation — what problem does this step solve\n'
-        '- key_detail: ONE specific value from paper (model name, metric, dataset, hyperparameter).\n\n'
+        '- Extract 6-10 highly detailed steps. DO NOT BE GENERIC.\n'
+        '- Dive deeply into the architecture, mathematics, dimensions, dataset specifics, and complex technical mechanisms!\n'
+        '- Each description MUST answer WHAT the component is, HOW it precisely works mathematically/algorithmically, and WHY it is used.\n'
+        '- key_detail: Provide an exact parameter, equation name, array dimension, or technical detail from the text.\n'
+        '- provenance: mark as "directly_stated" or "inferred".\n\n'
+        'RULES FOR implementation_details:\n'
+        '- If the paper specifies tools, exact algorithms, programming constraints, '
+        'databases, heuristics, or API implementations, extract them here.\n'
+        '- Identify the tool_technique, input data, output result, and a direct quote.\n\n'
         'RULES FOR potential_issues (write like a peer reviewer):\n'
-        '- 4-6 issues. Each must cite SPECIFIC evidence from the text.\n'
-        '- Consider: generalization beyond tested domains, scalability claims without proof,\n'
-        '  missing ablations, offline preprocessing cost not discussed for deployment,\n'
-        '  limited baseline diversity, evaluation only on accuracy (missing latency/cost),\n'
-        '  no error analysis, hyperparameter sensitivity not fully explored.\n'
-        '- severity "critical" = fundamental flaw; "issue" = notable weakness; "strong" = strength.\n\n'
+        '- 4-6 deep research issues citing SPECIFIC evidence.\n\n'
         '{\n'
         '  "methodology_steps": [\n'
         '    {\n'
         '      "step_number": 1,\n'
         '      "title": "precise technical step name",\n'
         '      "description": "WHAT: [component]. HOW: [technique used]. WHY: [motivation from paper].",\n'
-        '      "key_detail": "specific value e.g. Sentence-BERT encoder, k=6 retrieved subgraphs"\n'
+        '      "key_detail": "specific value e.g. Sentence-BERT encoder",\n'
+        '      "provenance": "procedural or directly_stated"\n'
+        '    }\n'
+        '  ],\n'
+        '  "implementation_details": [\n'
+        '    {\n'
+        '      "tool_technique": "Regex Parser / K-means clustering etc.",\n'
+        '      "input": "data input to this step",\n'
+        '      "output": "what this step produces",\n'
+        '      "quote": "direct quote or close paraphrase from paper",\n'
+        '      "provenance": "procedural"\n'
         '    }\n'
         '  ],\n'
         '  "metrics": [\n'
-        '    {"name": "metric name", "value": "exact number", "context": "dataset+condition", "page": 0}\n'
+        '    {"name": "metric name", "value": "exact number", "context": "dataset+condition", "page": 0, "provenance": "directly_stated"}\n'
         '  ],\n'
         '  "potential_issues": [\n'
         '    {\n'
@@ -635,7 +740,8 @@ def _prompt_call3(filename: str, graph_summary: str) -> str:
         '      "page": 0,\n'
         '      "citations_found": ["list of citations in same chunk"],\n'
         '      "status": "supported | unsupported | original_contribution",\n'
-        '      "risk_note": "why this might be a concern if unsupported"\n'
+        '      "risk_note": "why this might be a concern if unsupported",\n'
+        '      "provenance": "directly_stated"\n'
         '    }\n'
         '  ],\n'
         '  "research_gaps": [\n'
@@ -725,6 +831,8 @@ def parse_result(filename: str, pages: int, data: dict) -> PaperResult:
             page=f.get("page") if isinstance(f.get("page"), int) else None,
             section=safe(f.get("section")),
             source=safe(f.get("source"), "text"),
+            provenance=safe(f.get("provenance"), "directly_stated"),
+            image_base64=f.get("image_base64"),
         ))
 
     # Metrics
@@ -742,6 +850,7 @@ def parse_result(filename: str, pages: int, data: dict) -> PaperResult:
             name=name, value=value,
             context=safe(m.get("context")),
             page=m.get("page") if isinstance(m.get("page"), int) else None,
+            provenance=safe(m.get("provenance"), "directly_stated"),
         ))
 
     # Methodology steps
@@ -755,8 +864,23 @@ def parse_result(filename: str, pages: int, data: dict) -> PaperResult:
             title=safe(s.get("title"), "Step") or "Step",
             description=desc,
             key_detail=safe(s.get("key_detail")) or None,
+            provenance=safe(s.get("provenance"), "procedural"),
         ))
     for i, s in enumerate(steps): s.step_number = i+1
+
+    # Implementation Details
+    impl_details = []
+    for d in (data.get("implementation_details") or []):
+        if not isinstance(d, dict): continue
+        tool = safe(d.get("tool_technique")).strip()
+        if not tool: continue
+        impl_details.append(ImplementationDetail(
+            tool_technique=tool,
+            input=safe(d.get("input")),
+            output=safe(d.get("output")),
+            quote=safe(d.get("quote")),
+            provenance=safe(d.get("provenance"), "procedural"),
+        ))
 
     # Potential issues
     potential_issues = []
@@ -795,6 +919,7 @@ def parse_result(filename: str, pages: int, data: dict) -> PaperResult:
         formulas=formulas,
         metrics=metrics,
         methodology_steps=steps,
+        implementation_details=impl_details,
         potential_issues=potential_issues,
         comparison=ComparisonData(factors=factors),
     )
@@ -806,9 +931,19 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
         tmp.write(content)
         path = tmp.name
     try:
-        # STEP 1: Fast extraction with PyMuPDF
-        upd_paper(jid, filename, status="extracting", message="📄 Fast parsing with PyMuPDF…")
-        ext = _extract_pymupdf(path)
+        # STEP 1: Fast extraction with PyMuPDF OR Deep Math Extraction with Nougat
+        if USE_NOUGAT and extract_with_nougat:
+            upd_paper(jid, filename, status="extracting", message="📄 Deep OCR parsing with Meta Nougat (This may take minutes)…")
+            try:
+                ext = extract_with_nougat(path)
+            except Exception as e:
+                print(f"  ⚠️ Nougat failed ({e}). Falling back to PyMuPDF...")
+                upd_paper(jid, filename, status="extracting", message="📄 Fast parsing with PyMuPDF (Nougat fallback)…")
+                ext = _extract_pymupdf(path)
+        else:
+            upd_paper(jid, filename, status="extracting", message="📄 Fast parsing with PyMuPDF…")
+            ext = _extract_pymupdf(path)
+            
         pages   = ext["pages"]
         text    = ext["text"]
         sections = ext["sections"]
@@ -844,24 +979,81 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
                 print(f"  [{filename}] {len(image_formulas)} image formulas found")
 
         # STEP 4: THREE parallel Groq calls + ONE sequential call using citation graph
-        # Calls 1, A, B run in parallel:
-        #   Call 1: front+tail       → title, comparison metadata
-        #   Call A: body             → formulas ONLY (focused, no token overflow)
-        #   Call B: body             → methodology + metrics + issues
-        # Call C: graph_summary      → claim verification + research gaps
-        #   (runs after A+B so graph is ready; uses citation graph as grounded context)
-        front, body, tail = _sections(text)
+        # Call 1: title, comparison metadata
+        # Call A: formulas ONLY (focused, no token overflow)
+        # Call B: methodology + metrics + issues
+        # Call C: claim verification + research gaps (uses citation graph)
+        
+        upd_paper(jid, filename, status="analyzing",
+                  message="🧠 Generating RAG embeddings for chunks…")
+                  
+        front, _, tail = _sections(text)
+        
+        # Build RAG context through semantic chunking
+        rag_chunks = _build_rag_chunks(text)
+        emb_svc = get_embedding_service() if 'get_embedding_service' in globals() and get_embedding_service else None
+        
+        if emb_svc and len(rag_chunks) > 0:
+            doc_embs = emb_svc.encode_documents(rag_chunks).astype(np.float32)
+            
+            formula_queries = [
+                "mathematical formula equation",
+                "loss function objective optimization",
+                "theorem proof lemma derivation",
+                "algorithm training algorithm math"
+            ]
+            
+            methodology_queries = [
+                "methodology pipeline steps framework",
+                "dataset benchmarks implementation parameters",
+                "baseline models results",
+                "limitations issues analysis"
+            ]
+            
+            metadata_queries = [
+                "abstract introduction conclusion summary",
+                "authors year citations datasets models"
+            ]
+            
+            formula_context_chunks = _semantic_retrieve_multi(
+                formula_queries, rag_chunks, emb_svc, doc_embs, top_k=15
+            )
+            
+            method_context_chunks = _semantic_retrieve_multi(
+                methodology_queries, rag_chunks, emb_svc, doc_embs, top_k=10
+            )
+            
+            metadata_context_chunks = _semantic_retrieve_multi(
+                metadata_queries, rag_chunks, emb_svc, doc_embs, top_k=6
+            )
+            
+            formula_context = "\n\n".join(formula_context_chunks)[:15000]
+            method_context = "\n\n".join(method_context_chunks)[:8000]
+            middle_context = "\n\n".join(metadata_context_chunks)[:4000]
+        else:
+            print(f"  [{filename}] ⚠️ Skipping RAG - Falling back to fixed chunks.")
+            # Fallback if no crawler embeddings loaded
+            n = len(text)
+            body_start = max(3000, int(n * 0.12))
+            body_end   = min(n,    int(n * 0.62))
+            fixed_body = text[body_start:body_end][:15000]
+            formula_context = fixed_body
+            method_context = fixed_body
+            middle_context = text[int(n*0.42):int(n*0.42)+1500]
+            
         upd_paper(jid, filename, status="analyzing",
                   message="🤖 Analyzing paper (parallel calls)…")
 
         with ThreadPoolExecutor(max_workers=3) as paper_executor:
-            middle   = text[int(len(text)*0.42):int(len(text)*0.42)+1500]
             future1  = paper_executor.submit(
-                _groq_call, _prompt_call1(filename, pages, front, tail, middle), 1800)
+                _groq_call, _prompt_call1(filename, pages, front, tail, middle_context), 1800)
+            
+            # Use focused high-density mathematical chunks globally gathered
             futureA  = paper_executor.submit(
-                _groq_call, _prompt_formulas(body), 2000)
+                _groq_call, _prompt_formulas(formula_context), 4000)
+                
             futureB  = paper_executor.submit(
-                _groq_call, _prompt_methods_issues(body), 2500)
+                _groq_call, _prompt_methods_issues(method_context), 2500)
             d1   = future1.result()
             dA   = futureA.result()
             dB   = futureB.result()
@@ -871,9 +1063,9 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
               f"{len(dB.get('methodology_steps') or [])} steps, "
               f"{len(dB.get('potential_issues') or [])} issues")
 
-        # Call C skipped — citation graph summary alone is insufficient context
-        # for reliable claim verification. Keeping empty rather than showing wrong data.
-        dC = {}
+        # Call C: Claim Verification over priority graph summary
+        print(f"  [{filename}] Running Call C (Claims/Gaps/Contradictions)...")
+        dC = _groq_call(_prompt_call3(filename, graph_summary), 2500)
 
         # Deduplicate text formulas
         seen_f = set()
@@ -899,6 +1091,7 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
                 citations_found=c.get("citations_found") or [],
                 status=safe(c.get("status"), "unsupported"),
                 risk_note=safe(c.get("risk_note")),
+                provenance=safe(c.get("provenance"), "directly_stated"),
             ))
 
         raw_gaps = dC.get("research_gaps") or []
@@ -928,6 +1121,7 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
             "formulas":          all_formulas,
             "metrics":           dB.get("metrics") or [],
             "methodology_steps": dB.get("methodology_steps") or [],
+            "implementation_details": dB.get("implementation_details") or [],
             "potential_issues":  dB.get("potential_issues") or [],
         }
 
