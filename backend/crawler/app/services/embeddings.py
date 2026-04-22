@@ -3,6 +3,7 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 from typing import List
 from functools import lru_cache
+import re
 from crawler.app.config import get_settings
 
 settings = get_settings()
@@ -26,6 +27,40 @@ class EmbeddingService:
         
         print(f"✅ Model loaded on {self.device}")
     
+    def _normalize_text_for_embedding(self, text: str) -> str:
+        """
+        Convert LaTeX math signals into natural language tokens
+        so E5 embeddings can actually match them semantically.
+        """
+        s = text
+        replacements = [
+            (r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1 divided by \2'),
+            (r'\\sum_\{([^}]+)\}',  r'summation over \1'),
+            (r'\\sum',              'summation'),
+            (r'\\prod',             'product'),
+            (r'\\int',              'integral'),
+            (r'\\partial',          'partial derivative'),
+            (r'\\nabla',            'gradient'),
+            (r'\\infty',            'infinity'),
+            (r'\\alpha',   'alpha'),  (r'\\beta',  'beta'),
+            (r'\\gamma',   'gamma'),  (r'\\delta', 'delta'),
+            (r'\\theta',   'theta'),  (r'\\lambda','lambda'),
+            (r'\\sigma',   'sigma'),  (r'\\mu',    'mu'),
+            (r'\\mathcal\{L\}',     'loss function'),
+            (r'\\mathcal\{([^}]+)\}', r'math \1'),
+            (r'\\operatorname\{([^}]+)\}', r'\1'),
+            (r'\\text\{([^}]+)\}',  r'\1'),
+            (r'\\begin\{[^}]+\}|\\end\{[^}]+\}', ''),
+            (r'\\[a-zA-Z]+',        ''),   # strip remaining commands
+            (r'[_^{}]',             ' '),  # strip math punctuation
+            (r'[∑∏∫∂∇]',           'math operator'),
+            (r'[αβγδεθλμσφψω]',    'greek variable'),
+            (r'\s{2,}',             ' '),
+        ]
+        for pattern, replacement in replacements:
+            s = re.sub(pattern, replacement, s)
+        return s.strip()
+    
     def encode_query(self, query: str) -> np.ndarray:
         """
         Encode search query with E5 query prefix.
@@ -36,8 +71,10 @@ class EmbeddingService:
         Returns: 
             Embedding vector (numpy array)
         """
+        # Normalize LaTeX away
+        norm_query = self._normalize_text_for_embedding(query)
         # E5 models require "query: " prefix for queries
-        prefixed_query = f"query:  {query}"
+        prefixed_query = f"query: {norm_query}"
         return self._encode_text(prefixed_query)
     
     def encode_documents(self, texts: List[str]) -> np.ndarray:
@@ -53,8 +90,11 @@ class EmbeddingService:
         if not texts:
             return np. array([])
         
-        # E5 models require "passage:  " prefix for documents
-        prefixed_texts = [f"passage:  {text}" for text in texts]
+        # Normalize texts to strip LaTeX
+        norm_texts = [self._normalize_text_for_embedding(t) for t in texts]
+        
+        # E5 models require "passage: " prefix for documents
+        prefixed_texts = [f"passage: {text}" for text in norm_texts]
         
         embeddings = []
         batch_size = settings.EMBEDDING_BATCH_SIZE

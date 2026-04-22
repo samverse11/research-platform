@@ -149,8 +149,9 @@ async def search_papers(request: SearchRequest):
         print(f"📅 Years: {request.min_year}-{request.max_year}")
         print("=" * 60 + "\n")
 
-        # Signature = only filters (global cache across queries)
+        # Signature now includes query to prevent cache collisions
         req_sig = signature_for_request(
+            request.query,
             request.sources,
             request.min_year or 2015,
             request.max_year or 2025,
