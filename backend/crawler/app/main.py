@@ -173,7 +173,9 @@ async def search_papers(request: SearchRequest):
             and cache_sig is not None
             and signature_matches(cache_sig, req_sig)
         ):
-            cache_results = vector_store.search(query_emb, top_k=PREFETCH_K)
+            cache_results = vector_store.search(
+                query_emb, top_k=PREFETCH_K, sources=request.sources
+            )
             if cache_results:
                 cache_best_score = getattr(cache_results[0], "similarity_score", None)
 
@@ -244,9 +246,15 @@ async def search_papers(request: SearchRequest):
 
             vector_store.add_papers(papers, paper_embeddings)
             vector_store.save()
-            save_signature(req_sig)
+            # Merge sources: accumulate all sources ever fetched for this query
+            merged_sources = sorted(
+                set(req_sig["sources"]) | set((cache_sig or {}).get("sources", []))
+            )
+            save_signature({**req_sig, "sources": merged_sources})
 
-            ranked_papers = vector_store.search(query_emb, top_k=PREFETCH_K)
+            ranked_papers = vector_store.search(
+                query_emb, top_k=PREFETCH_K, sources=request.sources
+            )
             ranked_papers = dedup_ranked_papers(ranked_papers, request.top_k)
         else:
             ranked_papers = ranker.rank_papers(request.query, papers, request.top_k)

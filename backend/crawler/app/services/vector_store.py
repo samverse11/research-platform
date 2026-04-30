@@ -122,13 +122,20 @@ class VectorStore:
             f"Total: {len(self.papers)}"
         )
 
-    def search(self, query_embedding: np.ndarray, top_k: int = 10) -> List[RankedPaper]:
+    def search(
+        self,
+        query_embedding: np.ndarray,
+        top_k: int = 10,
+        sources: Optional[List[str]] = None,
+    ) -> List[RankedPaper]:
         """
         Search for similar papers using query embedding.
 
         Args:
             query_embedding: Query embedding vector
             top_k: Number of results to return
+            sources: If provided, only return papers from these sources.
+                     Over-fetches from FAISS then filters in Python.
 
         Returns:
             List of RankedPaper objects with similarity scores
@@ -140,24 +147,35 @@ class VectorStore:
         query_embedding = query_embedding.reshape(1, -1).astype("float32")
         faiss.normalize_L2(query_embedding)
 
-        # Search
-        similarities, indices = self.index.search(
-            query_embedding, min(top_k, self.index.ntotal)
+        # When source-filtering, over-fetch so we still get top_k after filtering.
+        # Cap at index total to avoid FAISS errors.
+        source_set = set(sources) if sources else None
+        fetch_k = min(
+            top_k * 4 if source_set else top_k,
+            self.index.ntotal,
         )
 
-        # Convert to RankedPaper objects
+        similarities, indices = self.index.search(query_embedding, fetch_k)
+
+        # Convert to RankedPaper objects, applying source filter
         ranked_papers: List[RankedPaper] = []
-        for rank, (idx, score) in enumerate(
-            zip(indices[0], similarities[0]), start=1
-        ):
-            if idx < len(self.papers):
-                paper = self.papers[idx]
-                ranked_paper = RankedPaper(
+        rank = 1
+        for idx, score in zip(indices[0], similarities[0]):
+            if idx >= len(self.papers):
+                continue
+            paper = self.papers[idx]
+            if source_set and paper.source not in source_set:
+                continue  # skip papers from sources not in this request
+            ranked_papers.append(
+                RankedPaper(
                     **paper.model_dump(),
                     similarity_score=float(score),
                     rank=rank,
                 )
-                ranked_papers.append(ranked_paper)
+            )
+            rank += 1
+            if len(ranked_papers) >= top_k:
+                break
 
         return ranked_papers
 
