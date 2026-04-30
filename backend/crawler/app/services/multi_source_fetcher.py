@@ -295,15 +295,19 @@ class MultiSourceFetcher:
     # ==================== ARXIV API ====================
     def _fetch_arxiv(self, query: str, max_results: int, min_year: int, max_year:  int) -> List[Paper]:
         """ArXiv: 2M+ preprints, perfect metadata"""
-        base_url = 'http://export.arxiv.org/api/query? '
-        search_query = f'search_query=all:{query}'
-        url = f'{base_url}{search_query}&max_results={max_results}&sortBy=relevance'
+        import urllib.parse
+        params = urllib.parse.urlencode({
+            'search_query': f'all:{query}',
+            'max_results': max_results,
+            'sortBy': 'relevance',
+        })
+        url = f'http://export.arxiv.org/api/query?{params}'
         
         papers = []
         
         try:
             response = urllib.request.urlopen(url, timeout=settings.REQUEST_TIMEOUT)
-            feed = feedparser.parse(response. read())
+            feed = feedparser.parse(response.read())
             
             for entry in feed.entries:
                 try:
@@ -412,48 +416,81 @@ class MultiSourceFetcher:
         return papers
     
     # ==================== SPRINGER API ====================
-    def _fetch_springer(self, query: str, max_results:  int, min_year: int, max_year: int) -> List[Paper]:
+    def _fetch_springer(self, query: str, max_results: int, min_year: int, max_year: int) -> List[Paper]:
         """Springer Nature: 13M+ papers"""
+        import requests as _req
+
         if not settings.SPRINGER_API_KEY:
-            raise ValueError("Springer requires SPRINGER_API_KEY in .env.  Get free key at https://dev.springernature.com/")
-        
-        url = "http://api.springernature.com/metadata/json"
+            print("⚠️  Springer: no API key set — skipping.")
+            return []
+
+        # Try the newer endpoint first, fall back to the older one
+        endpoints = [
+            "https://api.springernature.com/metadata/json",
+            "https://api.springer.com/metadata/json",
+        ]
+
+        url = None
+        for ep in endpoints:
+            try:
+                probe = self.session.get(
+                    ep,
+                    params={'api_key': settings.SPRINGER_API_KEY, 'q': query, 's': 1, 'p': 1},
+                    timeout=8,
+                )
+                if probe.status_code == 200:
+                    url = ep
+                    break
+                elif probe.status_code in (401, 403):
+                    print(
+                        f"⚠️  Springer: API key rejected (HTTP {probe.status_code}) at {ep}. "
+                        "Check that your key is subscribed to the Metadata API at "
+                        "https://dev.springernature.com — skipping Springer."
+                    )
+                    return []
+            except Exception:
+                continue  # try next endpoint
+
+        if url is None:
+            print("⚠️  Springer: could not reach any endpoint — skipping.")
+            return []
+
         papers = []
         start = 1
         page_size = 100
-        
+
         while len(papers) < max_results:
             params = {
                 'api_key': settings.SPRINGER_API_KEY,
                 'q': query,
                 's': start,
-                'p': min(page_size, max_results - len(papers))
+                'p': min(page_size, max_results - len(papers)),
             }
-            
+
             try:
                 response = self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 if not data.get('records'):
                     break
-                
-                for item in data['records']: 
+
+                for item in data['records']:
                     try:
                         year = None
                         if item.get('publicationDate'):
                             year = int(item['publicationDate'][:4])
-                        
+
                         if year and (year < min_year or year > max_year):
                             continue
-                        
+
                         authors = None
                         if item.get('creators'):
-                            authors = [a. get('creator') for a in item['creators'] if a.get('creator')]
-                        
+                            authors = [a.get('creator') for a in item['creators'] if a.get('creator')]
+
                         doi = item.get('doi')
                         url_main = f"https://doi.org/{doi}" if doi else item.get('url', [{}])[0].get('value')
-                        
+
                         paper = Paper(
                             title=item.get('title', '').strip(),
                             abstract=item.get('abstract'),
@@ -462,23 +499,26 @@ class MultiSourceFetcher:
                             venue=item.get('publicationName'),
                             year=year,
                             authors=authors,
-                            source="springer"
+                            source="springer",
                         )
-                        
+
                         if paper.title:
                             papers.append(paper)
-                            
+
                     except Exception:
                         continue
-                
+
                 if len(data['records']) < page_size:
                     break
-                    
+
                 start += page_size
                 time.sleep(0.5)
-                
+
+            except _req.exceptions.HTTPError as e:
+                print(f"⚠️  Springer HTTP error: {e} — stopping pagination.")
+                break
             except Exception as e:
-                print(f"\nSpringer error: {e}")
+                print(f"⚠️  Springer error: {e} — skipping.")
                 break
         
         return papers
