@@ -10,7 +10,8 @@ from crawler.app.main  import app as crawler_app
 from crawler.app.main  import startup_event as crawler_startup
 from analyzer.app.main import app as analyzer_app          # ← ADD
 from analyzer.app.main import startup as analyzer_startup  # ← ADD
-
+from summarization.app.main import app as summarization_app
+from summarization.app.main import startup_event as summarization_startup
 app = FastAPI(
     title="Research Platform API",
     version="1.0.0",
@@ -27,14 +28,15 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    print("\n🚀 Starting API Gateway...")
+    print("\nStarting API Gateway...")
     await crawler_startup()
     await analyzer_startup()    # ← ADD
-    print("✅ API Gateway Ready\n")
+    await summarization_startup()
+    print("API Gateway Ready\n")
 
 app.mount("/api/crawler",  crawler_app)
 app.mount("/api/analyzer", analyzer_app)   # ← ADD
-
+app.mount("/api/summarization", summarization_app)
 @app.get("/")
 async def root():
     return {
@@ -76,5 +78,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-
+    uvicorn.run("api_gateway.app.main:app", host="0.0.0.0", port=8000, reload=True)

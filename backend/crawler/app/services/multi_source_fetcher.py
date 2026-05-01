@@ -345,13 +345,13 @@ class MultiSourceFetcher:
     def _fetch_ieee(self, query: str, max_results: int, min_year: int, max_year: int) -> List[Paper]:
         """IEEE Xplore: 5M+ engineering/CS papers"""
         if not settings.IEEE_API_KEY:
-            raise ValueError("IEEE requires IEEE_API_KEY in . env.  Get free key at https://developer.ieee.org/")
-        
+            raise ValueError("IEEE requires IEEE_API_KEY in .env. Get free key at https://developer.ieee.org/")
+
         url = "https://ieeexploreapi.ieee.org/api/v1/search/articles"
         papers = []
         start_record = 1
         max_records = 200  # API limit
-        
+
         while len(papers) < max_results:
             params = {
                 'apikey': settings.IEEE_API_KEY,
@@ -363,57 +363,57 @@ class MultiSourceFetcher:
                 'sort_order': 'desc',
                 'sort_field': 'article_number'
             }
-            
+
             try:
-                response = self.session.get(url, params=params, timeout=settings. REQUEST_TIMEOUT)
+                response = self.session.get(url, params=params, timeout=settings.REQUEST_TIMEOUT)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 if not data.get('articles'):
                     break
-                
+
                 for item in data['articles']:
                     try:
                         authors = None
-                        if item.get('authors') and item['authors']. get('authors'):
-                            authors = [a.get('full_name') or a.get('author_name') 
-                                     for a in item['authors']['authors']]
-                        
+                        if item.get('authors') and item['authors'].get('authors'):
+                            authors = [a.get('full_name') or a.get('author_name')
+                                       for a in item['authors']['authors']]
+
                         doi = item.get('doi')
                         url_main = f"https://doi.org/{doi}" if doi else item.get('html_url')
-                        
                         pdf_url = item.get('pdf_url')
-                        
+
                         paper = Paper(
                             title=item.get('title', '').strip(),
                             abstract=item.get('abstract'),
                             url=url_main,
                             doi=doi,
                             venue=item.get('publication_title'),
-                            year=item. get('publication_year'),
+                            year=item.get('publication_year'),
                             authors=authors,
                             source="ieee",
                             citation_count=item.get('citing_paper_count', 0),
                             pdf_url=pdf_url
                         )
-                        
+
                         if paper.title:
                             papers.append(paper)
-                            
+
                     except Exception:
                         continue
-                
+
                 if len(data['articles']) < max_records:
                     break
-                    
+
                 start_record += max_records
                 time.sleep(0.5)
-                
-            except Exception as e: 
+
+            except Exception as e:
                 print(f"\nIEEE error: {e}")
                 break
-        
+
         return papers
+
     
     # ==================== SPRINGER API ====================
     def _fetch_springer(self, query: str, max_results: int, min_year: int, max_year: int) -> List[Paper]:

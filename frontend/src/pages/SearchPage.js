@@ -181,15 +181,15 @@ function SearchPage() {
               <div className="stat-label">Papers Returned</div>
             </div>
             <div className="stat-item">
-              <div className="stat-value">{results. total_fetched}</div>
+              <div className="stat-value">{results.total_fetched}</div>
               <div className="stat-label">Papers Fetched</div>
             </div>
             <div className="stat-item">
-              <div className="stat-value">{results.processing_time_seconds. toFixed(2)}s</div>
+              <div className="stat-value">{results.processing_time_seconds.toFixed(2)}s</div>
               <div className="stat-label">Processing Time</div>
             </div>
             <div className="stat-item">
-              <div className="stat-value">{results.sources_used. length}</div>
+              <div className="stat-value">{results.sources_used.length}</div>
               <div className="stat-label">Sources Used</div>
             </div>
           </div>
@@ -242,7 +242,7 @@ function SearchPage() {
                     {paper.citation_count !== null && paper.citation_count !== undefined && (
                       <div className="metadata-item">
                         <span className="metadata-label">Citations:</span>
-                        <span className="metadata-value">{paper. citation_count. toLocaleString()}</span>
+                        <span className="metadata-value">{paper.citation_count.toLocaleString()}</span>
                       </div>
                     )}
                   </div>

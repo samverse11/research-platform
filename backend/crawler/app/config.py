@@ -4,6 +4,10 @@ from functools import lru_cache
 from pathlib import Path
 import torch
 
+# Resolve .env path relative to this file (backend/.env), regardless of
+# where the server is launched from.
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+
 class Settings(BaseSettings):
     # API Settings
     APP_NAME: str = "Research Paper Discovery API"
@@ -51,7 +55,7 @@ class Settings(BaseSettings):
     CACHE_TTL_HOURS: int = 24
     
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE)
         case_sensitive = True
         extra = "ignore"
     
