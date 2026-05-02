@@ -1,17 +1,18 @@
-// frontend/src/pages/LoginPage.js
+// frontend/src/pages/SignupPage.js
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { toast } from 'react-toastify';
 import api from '../services/api';
-import './LoginPage.css';
+import './LoginPage.css'; // shared auth styles
 
-function LoginPage() {
+function SignupPage() {
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
 
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -21,10 +22,13 @@ function LoginPage() {
   }, [isAuthenticated, navigate]);
 
   const validate = () => {
+    if (!username.trim()) return 'Username is required';
+    if (username.trim().length < 2) return 'Username must be at least 2 characters';
     if (!email.trim()) return 'Email is required';
     if (!email.includes('@')) return 'Enter a valid email address';
     if (!password) return 'Password is required';
     if (password.length < 6) return 'Password must be at least 6 characters';
+    if (password !== confirmPassword) return 'Passwords do not match';
     return null;
   };
 
@@ -40,14 +44,29 @@ function LoginPage() {
 
     setLoading(true);
     try {
-      const res = await api.auth.login({ email: email.trim().toLowerCase(), password });
+      const res = await api.auth.register({
+        username: username.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+      });
       login(res.data.access_token, res.data.user);
-      toast.success(`Welcome back, ${res.data.user.username}!`);
       navigate('/dashboard');
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Login failed. Please try again.';
+      console.error("Signup Error:", err);
+      let msg = 'Registration failed. Please try again.';
+      
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (typeof detail === 'string') {
+          msg = detail;
+        } else if (Array.isArray(detail) && detail.length > 0) {
+          msg = detail[0].msg || 'Validation Error';
+        }
+      } else if (err.message) {
+        msg = err.message;
+      }
+      
       setError(msg);
-      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -56,9 +75,9 @@ function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <div className="auth-icon">🔐</div>
-        <h1 className="auth-title">Welcome Back</h1>
-        <p className="auth-subtitle">Sign in to your research account</p>
+        <div className="auth-icon">🚀</div>
+        <h1 className="auth-title">Create Account</h1>
+        <p className="auth-subtitle">Join the research platform</p>
 
         {error && (
           <div className="auth-alert alert-error">
@@ -68,6 +87,19 @@ function LoginPage() {
 
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="auth-field">
+            <label className="auth-label">Username</label>
+            <input
+              type="text"
+              className="auth-input"
+              placeholder="Choose a username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              autoFocus
+            />
+          </div>
+
+          <div className="auth-field">
             <label className="auth-label">Email</label>
             <input
               type="email"
@@ -76,7 +108,6 @@ function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
-              autoFocus
             />
           </div>
 
@@ -85,10 +116,22 @@ function LoginPage() {
             <input
               type="password"
               className="auth-input"
-              placeholder="Enter your password"
+              placeholder="Min. 6 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete="new-password"
+            />
+          </div>
+
+          <div className="auth-field">
+            <label className="auth-label">Confirm Password</label>
+            <input
+              type="password"
+              className="auth-input"
+              placeholder="Re-enter your password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
             />
           </div>
 
@@ -96,21 +139,21 @@ function LoginPage() {
             {loading ? (
               <>
                 <span className="auth-spinner" />
-                Signing In...
+                Creating Account...
               </>
             ) : (
-              'Sign In'
+              'Create Account'
             )}
           </button>
         </form>
 
         <div className="auth-footer">
-          Don't have an account?{' '}
-          <Link to="/signup">Create one</Link>
+          Already have an account?{' '}
+          <Link to="/login">Sign in</Link>
         </div>
       </div>
     </div>
   );
 }
 
-export default LoginPage;
+export default SignupPage;

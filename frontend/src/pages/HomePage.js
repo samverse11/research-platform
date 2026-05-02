@@ -1,9 +1,23 @@
 // frontend/src/pages/HomePage.js
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-toastify';
 import './HomePage.css';
 
 function HomePage() {
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleStartSearching = () => {
+    if (isAuthenticated) {
+      navigate('/search');
+    } else {
+      toast.info("Please login to start searching.");
+      navigate('/login');
+    }
+  };
+
   return (
     <div className="home-page">
       {/* Hero Section */}
@@ -19,9 +33,9 @@ function HomePage() {
           <p className="hero-description">
             Retrieve relevant research papers using semantic search, summarize both English and German research papers, and generate grouped summaries to compare key insights across selected documents.
           </p>
-          <Link to="/search" className="hero-cta">
+          <button onClick={handleStartSearching} className="hero-cta">
             Start Searching →
-          </Link>
+          </button>
         </div>
       </section>
 
@@ -158,9 +172,9 @@ function HomePage() {
         <p className="cta-description">
           Start searching through millions of academic papers now
         </p>
-        <Link to="/search" className="cta-button">
+        <button onClick={handleStartSearching} className="cta-button">
           Begin Search
-        </Link>
+        </button>
       </section>
     </div>
   );

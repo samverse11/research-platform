@@ -1,9 +1,20 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from datetime import datetime
 import time
 import traceback
+from typing import List, Optional
 from .services.vector_store import get_vector_store
-from typing import List
+from sqlalchemy.orm import Session
+
+import sys
+from pathlib import Path as _Path
+_bp = _Path(__file__).parent.parent.parent
+if str(_bp) not in sys.path:
+    sys.path.insert(0, str(_bp))
+
+from shared.database import get_db
+from shared.models import SearchHistoryDB
+from auth.jwt_handler import get_current_user_id
 from .services.cache_signature import (
     load_signature,
     save_signature,
@@ -133,7 +144,11 @@ async def health_check():
 
 
 @app.post("/search", response_model=SearchResponse)
-async def search_papers(request: SearchRequest):
+async def search_papers(
+    request: SearchRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     """
     Search and rank papers from multiple sources with full metadata.
     """
@@ -266,6 +281,20 @@ async def search_papers(request: SearchRequest):
         print(f"✅ Search completed in {processing_time:.2f}s")
         print(f"📊 Returned {len(ranked_papers)} papers")
         print(f"{'=' * 60}\n")
+
+        # ── Save search history ──
+        if user_id is not None:
+            try:
+                db.add(SearchHistoryDB(
+                    user_id=user_id,
+                    search_query=request.query,
+                    results_count=len(ranked_papers),
+                    sources_used=", ".join(request.sources),
+                ))
+                db.commit()
+                print(f"INFO: [SEARCH] Query saved to history for user {user_id}")
+            except Exception:
+                pass
 
         return SearchResponse(
             query=request.query,

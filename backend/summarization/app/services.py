@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -20,8 +21,12 @@ from .utils import (
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = "llama-3.3-70b-versatile"  # fast + smart, good for summarization
-MAX_CHUNK_CHARS = 6000  # safe limit per Groq request
+GROQ_MODEL = "llama-3.3-70b-versatile"
+MAX_CHUNK_CHARS = 6000
+
+
+def _log(msg: str):
+    print(f"INFO: {msg}", flush=True)
 
 
 class SummarizeRequest(BaseModel):
@@ -39,73 +44,54 @@ class ModelService:
 
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
         self.translator_tokenizer = None
         self.translator_model = None
-
         self.groq_client = None
 
     def load_models(self):
+        _log("=" * 60)
+        _log("  Loading Summarization & Translation Models")
+        _log("=" * 60)
 
-        print(f"💻 Loading models on {self.device.upper()}")
+        t0 = time.time()
+        self.translator_tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-de-en")
+        self.translator_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-de-en").to(self.device)
+        _log(f"  Translation model loaded in {time.time() - t0:.1f}s (Helsinki-NLP/opus-mt-de-en)")
 
-        # -------------------------------
-        # TRANSLATOR
-        # -------------------------------
-        self.translator_tokenizer = AutoTokenizer.from_pretrained(
-            "Helsinki-NLP/opus-mt-de-en"
-        )
-
-        self.translator_model = AutoModelForSeq2SeqLM.from_pretrained(
-            "Helsinki-NLP/opus-mt-de-en"
-        ).to(self.device)
-
-        # -------------------------------
-        # GROQ CLIENT
-        # -------------------------------
         if not GROQ_API_KEY:
-            raise ValueError("❌ GROQ_API_KEY not found in environment variables")
+            _log("  WARNING: GROQ_API_KEY not found")
+        else:
+            self.groq_client = Groq(api_key=GROQ_API_KEY)
+            _log(f"  Groq client ready ({GROQ_MODEL})")
 
-        self.groq_client = Groq(api_key=GROQ_API_KEY)
-        print(f"✅ Groq client initialized with model: {GROQ_MODEL}")
+        _log("  All models loaded")
 
-    # -------------------------------
-    # TRANSLATE
-    # -------------------------------
+    # ── TRANSLATE ─────────────────────────────────────────────────────────────
     def translate(self, request: TranslateRequest) -> str:
+        t_start = time.time()
+        _log(f"Step 1: Chunking text for translation ({len(request.text):,} chars)")
 
-        chunks = intelligent_chunking(
-            request.text,
-            self.translator_tokenizer,
-            400
-        )
+        chunks = intelligent_chunking(request.text, self.translator_tokenizer, 400)
+        _log(f"  {len(chunks)} chunks created")
 
+        _log(f"Step 2: Translating {len(chunks)} chunks ({request.source_lang} -> {request.target_lang})")
         translated = []
 
-        for chunk in chunks:
-            inputs = self.translator_tokenizer(
-                chunk,
-                return_tensors="pt"
-            ).to(self.device)
-
+        for i, chunk in enumerate(chunks, 1):
+            inputs = self.translator_tokenizer(chunk, return_tensors="pt").to(self.device)
             with torch.inference_mode():
-                outputs = self.translator_model.generate(
-                    **inputs,
-                    max_new_tokens=512
-                )
-
-            decoded = self.translator_tokenizer.decode(
-                outputs[0],
-                skip_special_tokens=True
-            )
-
+                outputs = self.translator_model.generate(**inputs, max_new_tokens=512)
+            decoded = self.translator_tokenizer.decode(outputs[0], skip_special_tokens=True)
             translated.append(decoded)
 
-        return "\n\n".join(translated)
+            if i % 5 == 0 or i == len(chunks):
+                _log(f"  Translated {i}/{len(chunks)} chunks")
 
-    # -------------------------------
-    # GROQ SUMMARIZATION HELPER
-    # -------------------------------
+        result = "\n\n".join(translated)
+        _log(f"  Translation complete in {time.time() - t_start:.1f}s ({len(result):,} chars)")
+        return result
+
+    # ── GROQ SUMMARIZE HELPER ─────────────────────────────────────────────────
     def _groq_summarize_chunk(self, text: str, context: str = "") -> str:
 
         system_prompt = (
@@ -132,14 +118,14 @@ class ModelService:
 
         return response.choices[0].message.content.strip()
 
-    # -------------------------------
-    # SUMMARIZATION
-    # -------------------------------
+    # ── SUMMARIZE ─────────────────────────────────────────────────────────────
     def summarize(self, request: SummarizeRequest) -> dict:
+        t_start = time.time()
 
         text = request.text or ""
 
-        # Cleaning pipeline
+        # Cleaning
+        _log(f"Step 1: Cleaning text ({len(text):,} chars)")
         text = remove_header_metadata(text)
         text = remove_keywords(text)
         text = remove_references(text)
@@ -149,38 +135,56 @@ class ModelService:
         if not text:
             text = clean_research_text(request.text)
 
+        _log(f"  Clean text: {len(text):,} chars")
+
+        # Section detection
+        _log("Step 2: Detecting sections")
         sections = split_into_sections(text)
+        non_empty = [k for k, v in sections.items() if v.strip()]
+        _log(f"  Found {len(non_empty)} sections: {', '.join(non_empty)}")
+
+        # Count total chunks
+        total_chunks = 0
+        for name, content in sections.items():
+            if not content.strip():
+                continue
+            if len(content) > MAX_CHUNK_CHARS:
+                total_chunks += min(3, (len(content) + MAX_CHUNK_CHARS - 1) // MAX_CHUNK_CHARS)
+            else:
+                total_chunks += 1
+
+        _log(f"Step 3: Summarizing {total_chunks} chunks via Groq API")
+
         section_summaries = {}
+        chunk_counter = 0
 
         for name, content in sections.items():
-
             if not content.strip():
                 continue
 
-            # If section is too long, chunk it and summarize each chunk
             if len(content) > MAX_CHUNK_CHARS:
-                chunks = [
-                    content[i:i + MAX_CHUNK_CHARS]
-                    for i in range(0, len(content), MAX_CHUNK_CHARS)
-                ]
-                chunk_summaries = [
-                    self._groq_summarize_chunk(chunk) for chunk in chunks[:3]
-                ]
+                sub_chunks = [content[i:i + MAX_CHUNK_CHARS] for i in range(0, len(content), MAX_CHUNK_CHARS)]
+                chunk_summaries = []
+                for chunk in sub_chunks[:3]:
+                    chunk_counter += 1
+                    _log(f"  Summarizing chunk {chunk_counter}/{total_chunks} ({name})")
+                    chunk_summaries.append(self._groq_summarize_chunk(chunk))
                 combined = " ".join(chunk_summaries)
             else:
+                chunk_counter += 1
                 combined = content
 
             section_summaries[name] = self._groq_summarize_chunk(combined)
 
-        # -------------------------------
-        # FINAL SUMMARY
-        # -------------------------------
+        _log(f"Step 4: Generating final summary")
         combined_text = " ".join(section_summaries.values())
-
         final_summary = self._groq_summarize_chunk(
             combined_text,
             context="This is a combination of section summaries. Produce a single cohesive final summary."
         )
+
+        _log(f"  Summarization complete in {time.time() - t_start:.1f}s | "
+             f"{len(non_empty)} sections | {len(final_summary.split())} words")
 
         return {
             "sections": section_summaries,
