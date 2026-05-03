@@ -78,11 +78,13 @@ const api = {
     summarizeFile: (formData) =>
       apiClient.post('/summarization/summarize_file', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 0,
       }),
 
     translateAndSummarizeFile: (formData) =>
       apiClient.post('/summarization/translate_and_summarize_file', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 0,
       }),
 
     summarizeFromUrl: (data) =>

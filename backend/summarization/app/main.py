@@ -110,6 +110,27 @@ async def summarize_file(
                 sections = json.loads(cached.sections_json)
             except Exception:
                 pass
+
+        # If this cache entry belongs to another user, create a per-user history
+        # row so the current user's dashboard/history remains consistent.
+        if cached.user_id != user_id:
+            save_summary_to_db(
+                db, user_id,
+                paper_title=file.filename.replace(".pdf", ""),
+                paper_hash=file_hash,
+                original_filename=file.filename,
+                summary_text=cached.summary_text or "",
+                sections=sections,
+                model_used=cached.model_used or "summarization_model_T5",
+                processing_time=cached.processing_time,
+            )
+            save_upload_metadata(
+                db, user_id,
+                filename=file.filename,
+                file_hash=file_hash,
+                file_size=len(pdf_bytes),
+            )
+
         return {
             "final_summary": cached.summary_text or "",
             "sections": sections,
@@ -133,7 +154,7 @@ async def summarize_file(
         original_filename=file.filename,
         summary_text=result.get("final_summary", ""),
         sections=result.get("sections"),
-        model_used="groq-llama-3.3-70b",
+        model_used="summarization_model_T5",
         processing_time=processing_time,
     )
     save_upload_metadata(
@@ -211,6 +232,29 @@ async def translate_and_summarize_file(
                 sections = json.loads(cached.sections_json)
             except Exception:
                 pass
+
+        # Preserve per-user history when serving a global cache hit.
+        if cached.user_id != user_id:
+            save_summary_to_db(
+                db, user_id,
+                paper_title=file.filename.replace(".pdf", ""),
+                paper_hash=file_hash,
+                original_filename=file.filename,
+                summary_text=cached.summary_text or "",
+                translated_text=cached.translated_text or "",
+                sections=sections,
+                detected_language=source_lang,
+                target_language=target_lang,
+                model_used=cached.model_used or "summarization_model_T5",
+                processing_time=cached.processing_time,
+            )
+            save_upload_metadata(
+                db, user_id,
+                filename=file.filename,
+                file_hash=file_hash,
+                file_size=len(pdf_bytes),
+            )
+
         return {
             "translation": cached.translated_text or "",
             "sections": sections,
@@ -246,7 +290,7 @@ async def translate_and_summarize_file(
         sections=summary_data.get("sections"),
         detected_language=source_lang,
         target_language=target_lang,
-        model_used="groq-llama-3.3-70b",
+        model_used="summarization_model_T5",
         processing_time=processing_time,
     )
     save_upload_metadata(
