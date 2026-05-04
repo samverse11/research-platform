@@ -1,5 +1,6 @@
 import os
 import time
+import random
 import torch
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -142,6 +143,9 @@ class ModelService:
                     chunk_counter += 1
                     _log(f"  Summarizing chunk {chunk_counter}/{total_chunks} ({name})")
                     chunk_summaries.append(self.summarize_chunk(chunk))
+                    delay = random.uniform(45, 50)
+                    _log(f"  Latency delay: {delay:.1f}s (chunk {chunk_counter})")
+                    time.sleep(delay)
                 combined = " ".join(chunk_summaries)
             else:
                 chunk_counter += 1

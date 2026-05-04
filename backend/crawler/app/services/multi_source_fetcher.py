@@ -32,7 +32,7 @@ class MultiSourceFetcher:
         sources: List[str],
         max_results: int = 50,
         min_year: int = 2015,
-        max_year: int = 2024
+        max_year: int = 2026
     ) -> List[Paper]:
         """Fetch papers from multiple sources"""
         all_papers = []
@@ -64,7 +64,7 @@ class MultiSourceFetcher:
         sources: List[str],
         max_results: int = 50,
         min_year: int = 2015,
-        max_year: int = 2024,
+        max_year: int = 2026,
         per_source_timeout_s: float = 12.0
     ) -> List[Paper]:
         """

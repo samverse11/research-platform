@@ -169,7 +169,7 @@ async def search_papers(
             request.query,
             request.sources,
             request.min_year or 2015,
-            request.max_year or 2025,
+            request.max_year or 2026,
         )
         cache_sig = load_signature()
 
@@ -225,7 +225,7 @@ async def search_papers(
             sources=request.sources,
             max_results=settings.MAX_PAPERS_PER_SOURCE,
             min_year=request.min_year or 2015,
-            max_year=request.max_year or 2025,
+            max_year=request.max_year or 2026,
             per_source_timeout_s=float(settings.FETCH_SOURCE_TIMEOUT_S),
         )
 

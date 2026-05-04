@@ -61,7 +61,7 @@ class SearchRequest(BaseModel):
         description="Sources to search from"
     )
     min_year: Optional[int] = Field(default=2015, ge=1900, le=2030)
-    max_year: Optional[int] = Field(default=2024, ge=1900, le=2030)
+    max_year: Optional[int] = Field(default=2026, ge=1900, le=2030)
     use_cache: bool = Field(default=True)
     
     class Config: 
@@ -71,7 +71,7 @@ class SearchRequest(BaseModel):
                 "top_k": 10,
                 "sources": ["openalex", "semantic_scholar", "arxiv", "ieee"],
                 "min_year":  2017,
-                "max_year":  2024
+                "max_year":  2026
             }
         }
 

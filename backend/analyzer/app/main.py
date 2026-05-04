@@ -43,7 +43,8 @@ except ImportError:
     pass
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-USE_NOUGAT = os.getenv("USE_NOUGAT", "False").lower() in ("true", "1", "yes")
+# Nougat OCR for PDFs (LaTeX-friendly). Set USE_NOUGAT=false for PyMuPDF-only (faster).
+USE_NOUGAT = os.getenv("USE_NOUGAT", "true").lower() in ("true", "1", "yes")
 
 try:
     from analyzer.app.nougat_extractor import extract_with_nougat
@@ -470,6 +471,63 @@ def _build_rag_chunks(text: str, chunk_size: int = 800, overlap: int = 150) -> L
     if not text:
         return []
     return chunk_text(text, chunk_size, overlap)
+
+
+def _extract_math_rich_segments(full_text: str, max_chars: int = 12000, pad: int = 500) -> str:
+    """
+    Collect raw spans around display math / equation environments.
+    Critical for Nougat .mmd: E5 RAG embeds *LaTeX-stripped* copies of chunks, so semantic
+    retrieval often ranks prose chunks above math — this bypasses that by feeding the LLM
+    the actual equation regions from the full document.
+    """
+    if not full_text or not full_text.strip():
+        return ""
+    n = len(full_text)
+    patterns = [
+        r"\\\[[\s\S]*?\\\]",  # \[ ... \]
+        r"\$\$[\s\S]*?\$\$",  # $$ ... $$
+        r"\\begin\{equation\*?\}[\s\S]*?\\end\{equation\*?\}",
+        r"\\begin\{align\*?\}[\s\S]*?\\end\{align\*?\}",
+        r"\\begin\{eqnarray\*?\}[\s\S]*?\\end\{eqnarray\*?\}",
+        r"\\begin\{gather\*?\}[\s\S]*?\\end\{gather\*?\}",
+        r"\\begin\{multline\*?\}[\s\S]*?\\end\{multline\*?\}",
+    ]
+    spans: List[tuple] = []
+    for pat in patterns:
+        try:
+            for m in re.finditer(pat, full_text):
+                a = max(0, m.start() - pad)
+                b = min(n, m.end() + pad)
+                spans.append((a, b))
+        except re.error:
+            continue
+    if not spans:
+        return ""
+    spans.sort(key=lambda x: x[0])
+    merged: List[List[int]] = []
+    for a, b in spans:
+        if not merged:
+            merged.append([a, b])
+        elif a <= merged[-1][1] + 2:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    parts: List[str] = []
+    total = 0
+    for a, b in merged:
+        chunk = full_text[a:b].strip()
+        if not chunk:
+            continue
+        sep = "\n\n…\n\n" if parts else ""
+        if total + len(sep) + len(chunk) > max_chars:
+            remain = max_chars - total - len(sep)
+            if remain > 200:
+                parts.append(sep + chunk[:remain])
+            break
+        parts.append(sep + chunk)
+        total += len(sep) + len(chunk)
+    return "".join(parts).strip()
+
 
 def _semantic_retrieve_multi(
     queries: List[str],
@@ -1027,7 +1085,18 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
                 metadata_queries, rag_chunks, emb_svc, doc_embs, top_k=6
             )
             
-            formula_context = "\n\n".join(formula_context_chunks)[:15000]
+            math_boost = _extract_math_rich_segments(text, max_chars=10000)
+            rag_formula = "\n\n".join(formula_context_chunks).strip()
+            if len(rag_formula) < 800:
+                n2 = len(text)
+                bs = max(2000, int(n2 * 0.08))
+                be = min(n2, int(n2 * 0.72))
+                rag_formula = text[bs:be][:14000]
+                print(f"  [{filename}] ⚠️ Formula RAG thin ({len(formula_context_chunks)} chunks) — using body slice fallback.")
+            glue = "\n\n=== MATH / EQUATION REGIONS (raw) ===\n\n" if math_boost and rag_formula else ""
+            formula_context = (math_boost + glue + rag_formula)[:18000]
+            if math_boost:
+                print(f"  [{filename}] Math-boost segments: {len(math_boost)} chars prepended to formula context.")
             method_context = "\n\n".join(method_context_chunks)[:8000]
             middle_context = "\n\n".join(metadata_context_chunks)[:4000]
         else:
@@ -1037,7 +1106,11 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
             body_start = max(3000, int(n * 0.12))
             body_end   = min(n,    int(n * 0.62))
             fixed_body = text[body_start:body_end][:15000]
-            formula_context = fixed_body
+            math_boost = _extract_math_rich_segments(text, max_chars=10000)
+            glue = "\n\n=== MATH / EQUATION REGIONS (raw) ===\n\n" if math_boost else ""
+            formula_context = (math_boost + glue + fixed_body)[:18000]
+            if math_boost:
+                print(f"  [{filename}] Math-boost segments: {len(math_boost)} chars (no RAG).")
             method_context = fixed_body
             middle_context = text[int(n*0.42):int(n*0.42)+1500]
             
@@ -1071,6 +1144,10 @@ def process_paper(jid: str, filename: str, content: bytes) -> PaperResult:
         seen_f = set()
         all_text_formulas = []
         for f in (dA.get("formulas") or []):
+            if not isinstance(f, dict):
+                continue
+            if not (f.get("latex") or "").strip() and (f.get("LaTeX") or "").strip():
+                f["latex"] = f.get("LaTeX")
             key = (f.get("name", "") + f.get("latex", "")).strip().lower()[:60]
             if key and key not in seen_f:
                 seen_f.add(key)
