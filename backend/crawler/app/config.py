@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     MAX_PAPERS_LIMIT: int = 1000
     
     # Vector DB Settings
-    USE_VECTOR_DB: bool = False
+    USE_VECTOR_DB: bool = True
     VECTOR_DB_TYPE: str = "faiss"
     VECTOR_DB_PATH: str = "./data/vector_store"
     FAISS_INDEX_PATH: str = "data/faiss_index"

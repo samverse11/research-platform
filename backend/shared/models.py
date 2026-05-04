@@ -50,7 +50,7 @@ class SummaryHistoryDB(Base):
     sections_json = Column(Text, nullable=True)  # JSON-serialized section summaries
     detected_language = Column(String(10), nullable=True)
     target_language = Column(String(10), nullable=True)
-    model_used = Column(String(100), nullable=True, default="groq-llama-3.3-70b")
+    model_used = Column(String(100), nullable=True, default="summarization_model_T5")
     upload_timestamp = Column(DateTime, default=datetime.utcnow)
     processing_time = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

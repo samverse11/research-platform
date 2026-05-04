@@ -1,9 +1,21 @@
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import pathlib
 from typing import Dict, Any
+
+
+def _nougat_executable() -> str:
+    exe = shutil.which("nougat")
+    if exe:
+        return exe
+    raise FileNotFoundError(
+        "Nougat CLI not found on PATH. Install with: pip install nougat-ocr "
+        "(requires PyTorch; first run downloads model weights)."
+    )
+
 
 def extract_with_nougat(pdf_path: str) -> Dict[str, Any]:
     """
@@ -17,22 +29,30 @@ def extract_with_nougat(pdf_path: str) -> Dict[str, Any]:
             # using 'nougat pdf_path --out out_dir --no-skipping'
             # (No skipping prevents Nougat from dropping pages it thinks are bad)
             print(f"  [Nougat] Booting vision transformer for {os.path.basename(pdf_path)}... (This may take minutes)")
+            nougat_bin = _nougat_executable()
             cmd = [
-                "nougat",
+                nougat_bin,
                 pdf_path,
-                "--out", out_dir,
-                "--no-skipping"
+                "-o", out_dir,
+                "--no-skipping",
             ]
             
             # Using timeout 600s (10 minutes)
             subprocess.run(cmd, check=True, timeout=600, capture_output=True, text=True)
             
-            # nougat outputs to a .mmd file named the same as the pdf
+            # Nougat writes markdown next to the PDF basename (.mmd or .md depending on version)
             pdf_base = pathlib.Path(pdf_path).stem
-            mmd_path = os.path.join(out_dir, f"{pdf_base}.mmd")
-            
-            if not os.path.exists(mmd_path):
-                raise RuntimeError(f"Nougat completed but {mmd_path} was not generated.")
+            out = pathlib.Path(out_dir)
+            candidates = sorted(out.glob(f"{pdf_base}.mmd")) + sorted(out.glob(f"{pdf_base}.md"))
+            mmd_path = str(candidates[0]) if candidates else ""
+
+            if not mmd_path or not os.path.exists(mmd_path):
+                found = list(out.iterdir()) if out.exists() else []
+                names = [p.name for p in found[:20]]
+                raise RuntimeError(
+                    f"Nougat finished but no {pdf_base}.mmd/.md in {out_dir}. "
+                    f"Files seen: {names or '(empty)'}"
+                )
                 
             with open(mmd_path, "r", encoding="utf-8") as f:
                 mmd_text = f.read()

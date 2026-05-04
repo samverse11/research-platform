@@ -71,7 +71,7 @@ def save_summary_to_db(
     sections: Optional[dict] = None,
     detected_language: Optional[str] = None,
     target_language: Optional[str] = None,
-    model_used: str = "groq-llama-3.3-70b",
+    model_used: str = "summarization_model_T5",
     processing_time: Optional[float] = None,
 ) -> Optional[SummaryHistoryDB]:
     """Save a summary result to the database."""

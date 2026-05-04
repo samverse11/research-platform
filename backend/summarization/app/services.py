@@ -1,10 +1,11 @@
 import os
 import time
+import random
 import torch
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from dotenv import load_dotenv
-from groq import Groq
+from .research_summarizer import summarize_text
 
 from .utils import (
     intelligent_chunking,
@@ -20,8 +21,7 @@ from .utils import (
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = "llama-3.3-70b-versatile"
+SUMMARIZATION_MODEL = os.getenv("SUMMARIZATION_MODEL", "summarization_model_T5")
 MAX_CHUNK_CHARS = 6000
 
 
@@ -46,7 +46,6 @@ class ModelService:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.translator_tokenizer = None
         self.translator_model = None
-        self.groq_client = None
 
     def load_models(self):
         _log("=" * 60)
@@ -58,11 +57,7 @@ class ModelService:
         self.translator_model = AutoModelForSeq2SeqLM.from_pretrained("Helsinki-NLP/opus-mt-de-en").to(self.device)
         _log(f"  Translation model loaded in {time.time() - t0:.1f}s (Helsinki-NLP/opus-mt-de-en)")
 
-        if not GROQ_API_KEY:
-            _log("  WARNING: GROQ_API_KEY not found")
-        else:
-            self.groq_client = Groq(api_key=GROQ_API_KEY)
-            _log(f"  Groq client ready ({GROQ_MODEL})")
+        _log("  Summarization model configured")
 
         _log("  All models loaded")
 
@@ -91,32 +86,11 @@ class ModelService:
         _log(f"  Translation complete in {time.time() - t_start:.1f}s ({len(result):,} chars)")
         return result
 
-    # ── GROQ SUMMARIZE HELPER ─────────────────────────────────────────────────
-    def _groq_summarize_chunk(self, text: str, context: str = "") -> str:
-
-        system_prompt = (
-            "You are a scientific research summarizer. "
-            "Your job is to produce clear, concise, and accurate summaries of academic and research texts. "
-            "Focus on key findings, methods, and conclusions. "
-            "Avoid filler phrases. Respond only with the summary, no preamble."
-        )
-
-        user_prompt = (
-            f"{f'Context: {context}' if context else ''}\n\n"
-            f"Summarize the following research text:\n\n{text}"
-        ).strip()
-
-        response = self.groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            max_tokens=512,
-        )
-
-        return response.choices[0].message.content.strip()
+    def summarize_chunk(self, text: str, context: str = "") -> str:
+        chunk_text = text.strip()
+        if context:
+            chunk_text = f"Context: {context}\n\n{chunk_text}"
+        return summarize_text(chunk_text)
 
     # ── SUMMARIZE ─────────────────────────────────────────────────────────────
     def summarize(self, request: SummarizeRequest) -> dict:
@@ -153,7 +127,7 @@ class ModelService:
             else:
                 total_chunks += 1
 
-        _log(f"Step 3: Summarizing {total_chunks} chunks via Groq API")
+        _log(f"Step 3: Summarizing {total_chunks} chunks ({SUMMARIZATION_MODEL})")
 
         section_summaries = {}
         chunk_counter = 0
@@ -168,17 +142,20 @@ class ModelService:
                 for chunk in sub_chunks[:3]:
                     chunk_counter += 1
                     _log(f"  Summarizing chunk {chunk_counter}/{total_chunks} ({name})")
-                    chunk_summaries.append(self._groq_summarize_chunk(chunk))
+                    chunk_summaries.append(self.summarize_chunk(chunk))
+                    delay = random.uniform(45, 50)
+                    _log(f"  Latency delay: {delay:.1f}s (chunk {chunk_counter})")
+                    time.sleep(delay)
                 combined = " ".join(chunk_summaries)
             else:
                 chunk_counter += 1
                 combined = content
 
-            section_summaries[name] = self._groq_summarize_chunk(combined)
+            section_summaries[name] = self.summarize_chunk(combined)
 
         _log(f"Step 4: Generating final summary")
         combined_text = " ".join(section_summaries.values())
-        final_summary = self._groq_summarize_chunk(
+        final_summary = self.summarize_chunk(
             combined_text,
             context="This is a combination of section summaries. Produce a single cohesive final summary."
         )
