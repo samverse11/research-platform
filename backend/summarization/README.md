@@ -1,21 +1,17 @@
 # Summarization Module
 
 ## Purpose
-Generate summaries of research papers using LLMs. 
+Generate summaries of research literature. 
 
-## TODO
-- [ ] Implement paper text extraction
-- [ ] Integrate LLM (GPT-4, Claude, or open-source)
-- [ ] Create summary generation pipeline
-- [ ] Add caching for summaries
-- [ ] Implement different summary types (short, detailed)
+## Features
+- [ ] Paper text extraction 
+- [ ] Summary generation pipeline
+- [ ] Caching for summaries
+- [ ] Different summary types (short, detailed)
 
 ## API Endpoints
 - `POST /summarize` - Generate summary for a paper
 - `GET /summary/{id}` - Retrieve existing summary
-
-## Team Member Assigned
-[Name here]
 
 ## Dependencies
 ```txt
